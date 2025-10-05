@@ -8,75 +8,16 @@ import shutil
 import subprocess
 import os
 
-# -------------------- DATABASE -------------------- #
+# -------------------- CONFIG -------------------- #
 DB = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expenses.db"
 
-# -------------------- TELEGRAM CONFIG -------------------- #
+# GitHub config
+GITHUB_TOKEN = "YOUR_PERSONAL_ACCESS_TOKEN"
+GITHUB_REPO = "USERNAME/expense-tracker"  # Format: username/repo
+
+# Telegram config
 TELEGRAM_TOKEN = "7071118483:AAHN5QXb9cKeLJFDiLEWzKO8b1JLwbGvCHg"
 CHAT_ID = 1430612355
-
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    response = requests.post(url, data=payload)
-    return response.ok
-
-def get_summary_message(selected_month="All Time"):
-    income_df = fetch_df("SELECT * FROM income")
-    exp_df = fetch_df("SELECT * FROM expenses")
-
-    if selected_month != "All Time":
-        income_df = income_df[income_df['month'] == selected_month]
-        exp_df = exp_df[pd.to_datetime(exp_df['date']).dt.to_period('M').astype(str) == selected_month]
-
-    total_income = income_df['amount'].sum() if not income_df.empty else 0
-    total_expenses = exp_df['amount'].sum() if not exp_df.empty else 0
-    net_savings = total_income - total_expenses
-
-    month_label = "All Time" if selected_month == "All Time" else pd.Period(selected_month).strftime("%b %Y") if selected_month else selected_month
-
-    message = f"💰 *Expense Tracker Summary* ({month_label})\n\n"
-    message += f"📈 *Total Income:* ₹{total_income:,.2f}\n"
-    message += f"💸 *Total Expenses:* ₹{total_expenses:,.2f}\n"
-    message += f"💎 *Net Savings:* ₹{net_savings:,.2f}\n\n"
-
-    if not exp_df.empty:
-        message += "🏷️ *Expenses by Category:*\n"
-        for cat, amt in exp_df.groupby("category")['amount'].sum().items():
-            message += f"• {cat}: ₹{amt:,.2f}\n"
-        message += "\n🔹 *Expenses by Sub-category:*\n"
-        for sub, amt in exp_df.groupby("sub_category")['amount'].sum().items():
-            message += f"• {sub}: ₹{amt:,.2f}\n"
-    else:
-        message += "No expenses recorded yet."
-
-    return message
-
-# -------------------- CREDIT CARD DATES -------------------- #
-credit_card_dates = {
-    "ICICI Amazon": {"statement": 28, "payment": 15},
-    "ICICI Raga": {"statement": 28, "payment": 15},
-    "Tata Neu": {"statement": 1, "payment": 21},
-    "HDFC Millina": {"statement": 14, "payment": 4},
-    "IDFC Petrol": {"statement": 19, "payment": 9},
-    "Axis Bank Neo": {"statement": 10, "payment": 30},
-    "Axis Petrol": {"statement": 17, "payment": 6},
-    "Axis My Zone": {"statement": 20, "payment": 9},
-    "IDFC Select": {"statement": 20, "payment": 4},
-    "IndusInd": {"statement": 15, "payment": 5},
-    "SBI": {"statement": 21, "payment": 10}
-}
-
-# -------------------- CATEGORIES -------------------- #
-main_categories = ["Rent", "Credit Card", "Utilities", "Education", "Investments", "Misc"]
-sub_categories_dict = {
-    "Rent": ["Home", "Others"],
-    "Credit Card": list(credit_card_dates.keys()),
-    "Utilities": ["Electricity", "Food", "Groceries", "Others"],
-    "Education": ["School", "Others"],
-    "Investments": ["Gold", "Silver", "LIC", "FD", "RD", "Mutual Fund", "Crypto", "Others"],
-    "Misc": []
-}
 
 # -------------------- UTILITY FUNCTIONS -------------------- #
 def run_query(query, params=()):
@@ -92,54 +33,98 @@ def fetch_df(query):
     conn.close()
     return df
 
-# -------------------- GITHUB PUSH FUNCTION -------------------- #
-GITHUB_TOKEN = "YOUR_PERSONAL_ACCESS_TOKEN"
-GITHUB_REPO = "USERNAME/expense-tracker"
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    response = requests.post(url, data=payload)
+    return response.ok
 
+def get_summary_message(selected_month="All Time"):
+    income_df = fetch_df("SELECT * FROM income")
+    exp_df = fetch_df("SELECT * FROM expenses")
+    
+    if selected_month != "All Time":
+        income_df = income_df[income_df['month'] == selected_month]
+        exp_df = exp_df[pd.to_datetime(exp_df['date']).dt.to_period('M').astype(str) == selected_month]
+    
+    total_income = income_df['amount'].sum() if not income_df.empty else 0
+    total_expenses = exp_df['amount'].sum() if not exp_df.empty else 0
+    net_savings = total_income - total_expenses
+    month_label = "All Time" if selected_month == "All Time" else pd.Period(selected_month).strftime("%b %Y")
+    
+    message = f"💰 *Expense Tracker Summary* ({month_label})\n\n"
+    message += f"📈 *Total Income:* ₹{total_income:,.2f}\n"
+    message += f"💸 *Total Expenses:* ₹{total_expenses:,.2f}\n"
+    message += f"💎 *Net Savings:* ₹{net_savings:,.2f}\n\n"
+    
+    if not exp_df.empty:
+        message += "🏷️ *Expenses by Category:*\n"
+        for cat, amt in exp_df.groupby("category")['amount'].sum().items():
+            message += f"• {cat}: ₹{amt:,.2f}\n"
+        message += "\n🔹 *Expenses by Sub-category:*\n"
+        for sub, amt in exp_df.groupby("sub_category")['amount'].sum().items():
+            message += f"• {sub}: ₹{amt:,.2f}\n"
+    else:
+        message += "No expenses recorded yet."
+    return message
+
+# -------------------- CREDIT CARD & CATEGORIES -------------------- #
+credit_card_dates = {
+    "ICICI Amazon": {"statement": 28, "payment": 15},
+    "ICICI Raga": {"statement": 28, "payment": 15},
+    "Tata Neu": {"statement": 1, "payment": 21},
+    "HDFC Millina": {"statement": 14, "payment": 4},
+    "IDFC Petrol": {"statement": 19, "payment": 9},
+    "Axis Bank Neo": {"statement": 10, "payment": 30},
+    "Axis Petrol": {"statement": 17, "payment": 6},
+    "Axis My Zone": {"statement": 20, "payment": 9},
+    "IDFC Select": {"statement": 20, "payment": 4},
+    "IndusInd": {"statement": 15, "payment": 5},
+    "SBI": {"statement": 21, "payment": 10}
+}
+
+main_categories = ["Rent", "Credit Card", "Utilities", "Education", "Investments", "Misc"]
+sub_categories_dict = {
+    "Rent": ["Home", "Others"],
+    "Credit Card": list(credit_card_dates.keys()),
+    "Utilities": ["Electricity", "Food", "Groceries", "Others"],
+    "Education": ["School", "Others"],
+    "Investments": ["Gold", "Silver", "LIC", "FD", "RD", "Mutual Fund", "Crypto", "Others"],
+    "Misc": []
+}
+
+# -------------------- PUSH TO GITHUB -------------------- #
 def push_files_to_github():
-    """Copy DB, app.py, db_setup.py to repo, commit only if changed, and push."""
-    local_files = [
-        r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expenses.db",
-        r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\app.py",
-        r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\db_setup.py"
-    ]
-    repo_path = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expense-tracker"
-    copied_any = False
+    local_folder = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker"
+    repo_folder = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expense-tracker"
 
-    for f in local_files:
-        dest = os.path.join(repo_path, os.path.basename(f))
-        if not os.path.exists(dest) or os.path.getmtime(f) > os.path.getmtime(dest):
-            shutil.copy2(f, dest)
-            copied_any = True
+    files_to_push = ["expenses.db", "app.py", "db_setup.py"]
 
-    if not copied_any:
-        st.info("ℹ️ No file changes detected. Nothing to push.")
+    # Copy files
+    try:
+        for file in files_to_push:
+            shutil.copy2(os.path.join(local_folder, file), os.path.join(repo_folder, file))
+        st.success("✅ Files copied to repo folder")
+    except Exception as e:
+        st.error(f"❌ Failed to copy files: {e}")
         return
 
-    st.success("✅ Files copied to repo folder")
-
+    # Git add, commit, push
     try:
-        os.chdir(repo_path)
-        subprocess.run(["git", "add", "-A"], check=True)
-        commit_result = subprocess.run(
-            ["git", "commit", "-m", "Update app/db files"],
-            capture_output=True, text=True
-        )
-        if "nothing to commit" in commit_result.stdout.lower():
-            st.info("ℹ️ No changes to commit. Repo already up-to-date.")
-        else:
-            st.success("✅ Changes committed locally")
-            repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
-            subprocess.run(["git", "push", repo_url, "main"], check=True)
-            st.success("✅ Files pushed to GitHub successfully")
+        os.chdir(repo_folder)
+        subprocess.run(["git", "add", "-f"] + files_to_push, check=True)
+        subprocess.run(["git", "commit", "-m", "Update expense tracker files"], check=True)
+        repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        subprocess.run(["git", "push", repo_url, "main"], check=True)
+        st.success("✅ Files pushed to GitHub successfully")
     except subprocess.CalledProcessError as e:
         st.error(f"❌ Git operation failed: {e}")
 
-# -------------------- SIDEBAR -------------------- #
+# -------------------- STREAMLIT UI -------------------- #
 st.sidebar.title("💰 Expense Tracker")
 page = st.sidebar.radio("Go to", ["Summary", "Add Income", "Add Expense", "View Data", "Monthly Comparison", "Yearly Comparison"])
 
-# -------------------- SUMMARY PAGE -------------------- #
+# -------------------- SUMMARY -------------------- #
 if page == "Summary":
     st.header("📊 Summary Dashboard")
     income_df = fetch_df("SELECT * FROM income")
@@ -164,9 +149,9 @@ if page == "Summary":
     total_expenses = exp_month['amount'].sum() if not exp_month.empty else 0
     net_savings = total_income - total_expenses
     last_updated = pd.to_datetime(exp_month['last_updated'].max()).strftime("%d-%m-%Y %H:%M") if 'last_updated' in exp_month.columns and not exp_month.empty else "No updates yet"
-    formatted_month = "All Time" if selected_month == "All Time" else pd.Period(selected_month).strftime("%b %Y") if selected_month else selected_month
-
+    formatted_month = "All Time" if selected_month == "All Time" else pd.Period(selected_month).strftime("%b %Y")
     st.markdown(f"### Summary for {formatted_month} (Last Updated: {last_updated})")
+
     col1, col2, col3 = st.columns([1.5, 1.5, 1.5])
     col1.metric("Total Income", f"₹{total_income:,.2f}")
     col2.metric("Total Expenses", f"₹{total_expenses:,.2f}")
@@ -181,10 +166,9 @@ if page == "Summary":
             st.error("❌ Failed to send message.")
 
     st.subheader("Push Files to GitHub")
-    if st.button("💾 Push Files"):
+    if st.button("💾 Push to GitHub"):
         push_files_to_github()
 
-    # ---------- Charts ----------
     if not exp_month.empty:
         st.subheader("Expense by Category")
         fig, ax = plt.subplots()
@@ -196,11 +180,9 @@ if page == "Summary":
         top5 = exp_month.groupby('sub_category')['amount'].sum().sort_values(ascending=False).head(5)
         st.bar_chart(top5)
 
-# -------------------- OTHER PAGES -------------------- #
-# Add Income, Add Expense, View Data, Monthly Comparison, Yearly Comparison...
-# Use your previous working code for these pages (all charting logic, edit/delete logic remains intact)
-
-# For brevity, I'm omitting the rest here, but you can append all previous page logic as-is.
+# -------------------- REST OF PAGES -------------------- #
+# Add Income, Add Expense, View Data, Monthly/Yearly Comparison...
+# Keep your previous logic here (exactly like your last working version)
 
 
 
