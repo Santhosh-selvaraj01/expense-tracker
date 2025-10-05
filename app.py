@@ -1,31 +1,14 @@
 import streamlit as st
-
-# ---- Simple Login ----
-PASSWORD = "Mit@12345678"  # <-- change this to a strong password
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if not st.session_state.logged_in:
-    password_input = st.text_input("Enter password", type="password")
-    if st.button("Login"):
-        if password_input == PASSWORD:
-            st.session_state.logged_in = True
-            st.success("✅ Logged in successfully!")
-        else:
-            st.error("❌ Incorrect password")
-    st.stop()  # stops the rest of the app until login
-
-
-
-import streamlit as st
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 import requests
+import shutil
+import subprocess
+import os
 
-DB = "expenses.db"
+DB = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expenses.db"
 
 # -------------------- TELEGRAM CONFIG -------------------- #
 TELEGRAM_TOKEN = "7071118483:AAHN5QXb9cKeLJFDiLEWzKO8b1JLwbGvCHg"
@@ -38,7 +21,6 @@ def send_telegram_message(message):
     return response.ok
 
 def get_summary_message(selected_month="All Time"):
-    """Return a formatted summary message (monthly or all time)."""
     income_df = fetch_df("SELECT * FROM income")
     exp_df = fetch_df("SELECT * FROM expenses")
 
@@ -50,14 +32,7 @@ def get_summary_message(selected_month="All Time"):
     total_expenses = exp_df['amount'].sum() if not exp_df.empty else 0
     net_savings = total_income - total_expenses
 
-    # Format month display
-    if selected_month == "All Time":
-        month_label = "All Time"
-    else:
-        try:
-            month_label = pd.Period(selected_month).strftime("%b %Y")
-        except:
-            month_label = selected_month
+    month_label = "All Time" if selected_month == "All Time" else pd.Period(selected_month).strftime("%b %Y") if selected_month else selected_month
 
     message = f"💰 *Expense Tracker Summary* ({month_label})\n\n"
     message += f"📈 *Total Income:* ₹{total_income:,.2f}\n"
@@ -116,14 +91,61 @@ def fetch_df(query):
     conn.close()
     return df
 
+# -------------------- GITHUB PUSH FUNCTION -------------------- #
+GITHUB_TOKEN = "YOUR_PERSONAL_ACCESS_TOKEN"
+GITHUB_REPO = "USERNAME/expense-tracker"
+LOCAL_FOLDER = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker"
+REPO_FOLDER = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expense-tracker"
+
+def copy_if_newer(src_path, dest_path):
+    """Copy file only if src is newer than dest."""
+    if not os.path.exists(src_path):
+        st.error(f"Source file does not exist: {src_path}")
+        return False
+    src_mtime = os.path.getmtime(src_path)
+    if os.path.exists(dest_path):
+        dest_mtime = os.path.getmtime(dest_path)
+        if src_mtime <= dest_mtime:
+            st.info(f"No changes detected for {os.path.basename(src_path)}. Skipping copy.")
+            return False
+    shutil.copy2(src_path, dest_path)
+    st.success(f"✅ {os.path.basename(src_path)} copied to repo folder")
+    return True
+
+def push_to_github():
+    files_to_copy = ["expenses.db", "app.py", "db_setup.py"]
+    any_changes = False
+    for f in files_to_copy:
+        src = os.path.join(LOCAL_FOLDER, f)
+        dest = os.path.join(REPO_FOLDER, f)
+        if copy_if_newer(src, dest):
+            any_changes = True
+
+    if not any_changes:
+        st.info("No files changed. Nothing to push.")
+        return
+
+    try:
+        os.chdir(REPO_FOLDER)
+        subprocess.run(["git", "add"] + files_to_copy, check=True)
+        commit_result = subprocess.run(["git", "commit", "-m", "Update files"], capture_output=True, text=True)
+        if "nothing to commit" in commit_result.stdout.lower():
+            st.info("ℹ️ No changes to commit. Repo up-to-date.")
+        else:
+            st.success("✅ Files committed locally")
+            repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+            subprocess.run(["git", "push", repo_url, "main"], check=True)
+            st.success("✅ Files pushed to GitHub successfully")
+    except subprocess.CalledProcessError as e:
+        st.error(f"❌ Git operation failed: {e}")
+
 # -------------------- SIDEBAR -------------------- #
 st.sidebar.title("💰 Expense Tracker")
 page = st.sidebar.radio("Go to", ["Summary", "Add Income", "Add Expense", "View Data", "Monthly Comparison", "Yearly Comparison"])
 
-# -------------------- SUMMARY -------------------- #
+# -------------------- SUMMARY PAGE -------------------- #
 if page == "Summary":
     st.header("📊 Summary Dashboard")
-
     income_df = fetch_df("SELECT * FROM income")
     exp_df = fetch_df("SELECT * FROM expenses")
 
@@ -134,73 +156,57 @@ if page == "Summary":
         income_df['month'] = pd.to_datetime(income_df['month']).dt.to_period('M')
 
     all_months = sorted(list(set(exp_df['month'].astype(str).tolist() + income_df['month'].astype(str).tolist())))
+    selected_month = st.selectbox("Select Month for Summary", ["All Time"] + all_months, index=len(all_months))
 
-    if all_months:
-        selected_month = st.selectbox("Select Month for Summary", ["All Time"] + all_months, index=len(all_months))
-        if selected_month != "All Time":
-            income_month = income_df[income_df['month'].astype(str) == selected_month] if not income_df.empty else pd.DataFrame()
-            exp_month = exp_df[exp_df['month'].astype(str) == selected_month] if not exp_df.empty else pd.DataFrame()
-        else:
-            income_month, exp_month = income_df, exp_df
-
-        total_income = income_month['amount'].sum() if not income_month.empty else 0
-        total_expenses = exp_month['amount'].sum() if not exp_month.empty else 0
-        net_savings = total_income - total_expenses
-
-        last_updated = pd.to_datetime(exp_month['last_updated'].max()).strftime("%d-%m-%Y %H:%M") if 'last_updated' in exp_month.columns and not exp_month.empty else "No updates yet"
-
-        # Format dashboard title with month
-        if selected_month == "All Time":
-            formatted_month = "All Time"
-        else:
-            try:
-                formatted_month = pd.Period(selected_month).strftime("%b %Y")
-            except:
-                formatted_month = selected_month
-
-        st.markdown(f"### Summary for {formatted_month} (Last Updated: {last_updated})")
-
-        col1, col2, col3 = st.columns([1.5, 1.5, 1.5])
-        col1.metric("Total Income", f"₹{total_income:,.2f}")
-        col2.metric("Total Expenses", f"₹{total_expenses:,.2f}")
-        col3.metric("Net Savings", f"₹{net_savings:,.2f}")
-
-        # Telegram button
-        st.subheader("Send Summary to Telegram")
-        if st.button("📨 Send This Summary"):
-            message = get_summary_message(selected_month)
-            if send_telegram_message(message):
-                st.success("✅ Summary sent to Telegram!")
-            else:
-                st.error("❌ Failed to send message.")
-
-        if not exp_month.empty:
-            st.subheader("Expense by Category")
-            fig, ax = plt.subplots()
-            exp_month.groupby("category")['amount'].sum().plot.pie(autopct="%.1f%%", startangle=90, ax=ax, shadow=True)
-            ax.set_ylabel("")
-            st.pyplot(fig)
-
-            st.subheader("Top 5 Expense Sub-categories")
-            top5 = exp_month.groupby('sub_category')['amount'].sum().sort_values(ascending=False).head(5)
-            st.bar_chart(top5)
+    if selected_month != "All Time":
+        income_month = income_df[income_df['month'].astype(str) == selected_month] if not income_df.empty else pd.DataFrame()
+        exp_month = exp_df[exp_df['month'].astype(str) == selected_month] if not exp_df.empty else pd.DataFrame()
     else:
-        st.info("No data available. Add income and expenses first!")
+        income_month, exp_month = income_df, exp_df
 
-# -------------------- ADD INCOME -------------------- #
-# (UNCHANGED – your existing logic)
+    total_income = income_month['amount'].sum() if not income_month.empty else 0
+    total_expenses = exp_month['amount'].sum() if not exp_month.empty else 0
+    net_savings = total_income - total_expenses
 
-# -------------------- ADD EXPENSE -------------------- #
-# (UNCHANGED – your existing logic)
+    last_updated = pd.to_datetime(exp_month['last_updated'].max()).strftime("%d-%m-%Y %H:%M") if 'last_updated' in exp_month.columns and not exp_month.empty else "No updates yet"
+    formatted_month = "All Time" if selected_month == "All Time" else (pd.Period(selected_month).strftime("%b %Y") if selected_month else selected_month)
+    st.markdown(f"### Summary for {formatted_month} (Last Updated: {last_updated})")
 
-# -------------------- VIEW DATA -------------------- #
-# (UNCHANGED – your existing logic)
+    col1, col2, col3 = st.columns([1.5, 1.5, 1.5])
+    col1.metric("Total Income", f"₹{total_income:,.2f}")
+    col2.metric("Total Expenses", f"₹{total_expenses:,.2f}")
+    col3.metric("Net Savings", f"₹{net_savings:,.2f}")
 
-# -------------------- MONTHLY COMPARISON -------------------- #
-# (UNCHANGED – your existing logic)
+    st.subheader("Send Summary to Telegram")
+    if st.button("📨 Send This Summary"):
+        message = get_summary_message(selected_month)
+        if send_telegram_message(message):
+            st.success("✅ Summary sent to Telegram!")
+        else:
+            st.error("❌ Failed to send message.")
 
-# -------------------- YEARLY COMPARISON -------------------- #
-# (UNCHANGED – your existing logic)
+    st.subheader("Push DB & Code to GitHub")
+    if st.button("💾 Push DB & Code"):
+        push_to_github()
+
+    # Charts
+    if not exp_month.empty:
+        st.subheader("Expense by Category")
+        fig, ax = plt.subplots()
+        exp_month.groupby("category")['amount'].sum().plot.pie(autopct="%.1f%%", startangle=90, ax=ax, shadow=True)
+        ax.set_ylabel("")
+        st.pyplot(fig)
+
+        st.subheader("Top 5 Expense Sub-categories")
+        top5 = exp_month.groupby('sub_category')['amount'].sum().sort_values(ascending=False).head(5)
+        st.bar_chart(top5)
+
+# -------------------- Other pages -------------------- #
+# Add Income, Add Expense, View Data, Monthly Comparison, Yearly Comparison
+# (You can include all the logic you already shared for these pages)
+
+
+
 
 
 # -------------------- ADD INCOME -------------------- #
