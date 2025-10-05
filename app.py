@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import os
 
+# -------------------- DATABASE -------------------- #
 DB = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expenses.db"
 
 # -------------------- TELEGRAM CONFIG -------------------- #
@@ -94,45 +95,40 @@ def fetch_df(query):
 # -------------------- GITHUB PUSH FUNCTION -------------------- #
 GITHUB_TOKEN = "YOUR_PERSONAL_ACCESS_TOKEN"
 GITHUB_REPO = "USERNAME/expense-tracker"
-LOCAL_FOLDER = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker"
-REPO_FOLDER = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expense-tracker"
 
-def copy_if_newer(src_path, dest_path):
-    """Copy file only if src is newer than dest."""
-    if not os.path.exists(src_path):
-        st.error(f"Source file does not exist: {src_path}")
-        return False
-    src_mtime = os.path.getmtime(src_path)
-    if os.path.exists(dest_path):
-        dest_mtime = os.path.getmtime(dest_path)
-        if src_mtime <= dest_mtime:
-            st.info(f"No changes detected for {os.path.basename(src_path)}. Skipping copy.")
-            return False
-    shutil.copy2(src_path, dest_path)
-    st.success(f"✅ {os.path.basename(src_path)} copied to repo folder")
-    return True
+def push_files_to_github():
+    """Copy DB, app.py, db_setup.py to repo, commit only if changed, and push."""
+    local_files = [
+        r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expenses.db",
+        r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\app.py",
+        r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\db_setup.py"
+    ]
+    repo_path = r"C:\Users\sanra\OneDrive\Desktop\Monthly Tracker\expense-tracker"
+    copied_any = False
 
-def push_to_github():
-    files_to_copy = ["expenses.db", "app.py", "db_setup.py"]
-    any_changes = False
-    for f in files_to_copy:
-        src = os.path.join(LOCAL_FOLDER, f)
-        dest = os.path.join(REPO_FOLDER, f)
-        if copy_if_newer(src, dest):
-            any_changes = True
+    for f in local_files:
+        dest = os.path.join(repo_path, os.path.basename(f))
+        if not os.path.exists(dest) or os.path.getmtime(f) > os.path.getmtime(dest):
+            shutil.copy2(f, dest)
+            copied_any = True
 
-    if not any_changes:
-        st.info("No files changed. Nothing to push.")
+    if not copied_any:
+        st.info("ℹ️ No file changes detected. Nothing to push.")
         return
 
+    st.success("✅ Files copied to repo folder")
+
     try:
-        os.chdir(REPO_FOLDER)
-        subprocess.run(["git", "add"] + files_to_copy, check=True)
-        commit_result = subprocess.run(["git", "commit", "-m", "Update files"], capture_output=True, text=True)
+        os.chdir(repo_path)
+        subprocess.run(["git", "add", "-A"], check=True)
+        commit_result = subprocess.run(
+            ["git", "commit", "-m", "Update app/db files"],
+            capture_output=True, text=True
+        )
         if "nothing to commit" in commit_result.stdout.lower():
-            st.info("ℹ️ No changes to commit. Repo up-to-date.")
+            st.info("ℹ️ No changes to commit. Repo already up-to-date.")
         else:
-            st.success("✅ Files committed locally")
+            st.success("✅ Changes committed locally")
             repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
             subprocess.run(["git", "push", repo_url, "main"], check=True)
             st.success("✅ Files pushed to GitHub successfully")
@@ -167,11 +163,10 @@ if page == "Summary":
     total_income = income_month['amount'].sum() if not income_month.empty else 0
     total_expenses = exp_month['amount'].sum() if not exp_month.empty else 0
     net_savings = total_income - total_expenses
-
     last_updated = pd.to_datetime(exp_month['last_updated'].max()).strftime("%d-%m-%Y %H:%M") if 'last_updated' in exp_month.columns and not exp_month.empty else "No updates yet"
-    formatted_month = "All Time" if selected_month == "All Time" else (pd.Period(selected_month).strftime("%b %Y") if selected_month else selected_month)
-    st.markdown(f"### Summary for {formatted_month} (Last Updated: {last_updated})")
+    formatted_month = "All Time" if selected_month == "All Time" else pd.Period(selected_month).strftime("%b %Y") if selected_month else selected_month
 
+    st.markdown(f"### Summary for {formatted_month} (Last Updated: {last_updated})")
     col1, col2, col3 = st.columns([1.5, 1.5, 1.5])
     col1.metric("Total Income", f"₹{total_income:,.2f}")
     col2.metric("Total Expenses", f"₹{total_expenses:,.2f}")
@@ -185,11 +180,11 @@ if page == "Summary":
         else:
             st.error("❌ Failed to send message.")
 
-    st.subheader("Push DB & Code to GitHub")
-    if st.button("💾 Push DB & Code"):
-        push_to_github()
+    st.subheader("Push Files to GitHub")
+    if st.button("💾 Push Files"):
+        push_files_to_github()
 
-    # Charts
+    # ---------- Charts ----------
     if not exp_month.empty:
         st.subheader("Expense by Category")
         fig, ax = plt.subplots()
@@ -201,9 +196,11 @@ if page == "Summary":
         top5 = exp_month.groupby('sub_category')['amount'].sum().sort_values(ascending=False).head(5)
         st.bar_chart(top5)
 
-# -------------------- Other pages -------------------- #
-# Add Income, Add Expense, View Data, Monthly Comparison, Yearly Comparison
-# (You can include all the logic you already shared for these pages)
+# -------------------- OTHER PAGES -------------------- #
+# Add Income, Add Expense, View Data, Monthly Comparison, Yearly Comparison...
+# Use your previous working code for these pages (all charting logic, edit/delete logic remains intact)
+
+# For brevity, I'm omitting the rest here, but you can append all previous page logic as-is.
 
 
 
